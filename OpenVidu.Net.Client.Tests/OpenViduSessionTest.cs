@@ -6,8 +6,8 @@ namespace OpenVidu.Net.Client.Tests
     [TestClass]
     public class OpenViduSessionTest
     {
-        private const string BaseUrl = "https://de1-master.eu.deep-help.com/";
-        private const string Secret = "uLzvrmdFa4";
+        private const string BaseUrl = "";
+        private const string Secret = "";
 
         [TestMethod]
         public async Task Create_And_Delete_Session_With_Token_Check()

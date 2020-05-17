@@ -42,7 +42,7 @@ namespace OpenVidu.Net.Client
         public Session(OpenVidu openVidu, JsonObject json)
         {
             this._openVidu = openVidu;
-            //this.resetSessionWithJson(json);
+            this.resetSessionWithJson(json);
         }
 
         /**
@@ -251,7 +251,8 @@ namespace OpenVidu.Net.Client
             {
                 if (response.StatusCode.Equals(HttpStatusCode.NoContent))
                 {
-                    //this._openVidu.activeSessions.remove(this._sessionId);
+                    var session = this._openVidu.ActiveSessions.FirstOrDefault(s => s._sessionId == this._sessionId);
+                    this._openVidu.ActiveSessions.Remove(session);
                     _logger.LogInformation("Session {} closed", this._sessionId);
                     return true;
                 }
@@ -341,10 +342,117 @@ namespace OpenVidu.Net.Client
             {
                 throw new OpenViduClientException(e.Message);
             }
+        }
 
+        public void forceDisconnect(Connection connection)
+        {
+            this.forceDisconnect(connection.ConnectionId);
+        }
 
+        public async void forceDisconnect(string connectionId)
+        {
+            HttpResponseMessage response;
 
+            try
+            {
+                response = await _openVidu.HttpClient.DeleteAsync(_openVidu.ApiSessions + "/" + this._sessionId + "/connection/" + connectionId);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new OpenViduClientException(ex.Message, ex.InnerException);
+            }
 
+            try
+            {
+                if (response.StatusCode == HttpStatusCode.NoContent)
+                {
+                    // Remove connection from activeConnections map
+                    this._activeConnections.TryRemove(connectionId, out var connectionClosed);
+                    // Remove every Publisher of the closed connection from every subscriber list of
+                    // other connections
+                    if (connectionClosed != null)
+                    {
+                        foreach (var publisher in connectionClosed.Publishers)
+                        {
+                            var streamId = publisher.StreamId;
+                            foreach (var connection in this._activeConnections.Values)
+                            {
+                                connection.Subscribers = connection.Subscribers.Where(subscriber => !streamId.Equals(subscriber)).ToList();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("The closed connection wasn't fetched in OpenVidu Java Client. No changes in the collection of active connections of the Session");
+                    }
+                    _logger.LogInformation("Connection {} closed", connectionId);
+                }
+                else
+                {
+                    throw new OpenViduHttpException((int)response.StatusCode);
+                }
+            }
+            catch (Exception e)
+            {
+                throw new OpenViduClientException(e.Message);
+            }
+        }
+
+        public virtual void forceUnpublish(Publisher publisher)
+        {
+            this.forceUnpublish(publisher.StreamId);
+        }
+
+        public async void forceUnpublish(string streamId)
+        {
+            HttpResponseMessage response;
+
+            try
+            {
+                response = await _openVidu.HttpClient.DeleteAsync(_openVidu.ApiSessions + "/" + this._sessionId + "/stream/" + streamId);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new OpenViduClientException(ex.Message, ex.InnerException);
+            }
+
+            try
+            {
+                if (response.StatusCode == HttpStatusCode.NoContent)
+                {
+                    foreach (var connection in this._activeConnections.Values)
+                    {
+                        var publisher = connection.Publishers.Find(s => s.StreamId == streamId);
+                        
+                        // Try to remove the Publisher from the Connection publishers collection
+                        if (connection.Publishers.Remove(publisher))
+                        {
+                            continue;
+                        }
+                        // Try to remove the Publisher from the Connection subscribers collection
+                        connection.Subscribers.Remove(streamId);
+                    }
+                    _logger.LogInformation("Stream {} unpublished", streamId);
+                }
+                else
+                {
+                    throw new OpenViduHttpException((int)response.StatusCode);
+                }
+            }
+            catch (Exception e)
+            {
+                throw new OpenViduClientException(e.Message);
+            }
+        }
+
+        public override string ToString()
+        {
+            return this._sessionId;
+        }
+
+        public bool IsBeingRecorded
+        {
+            set => _recording = value;
         }
 
         public Session resetSessionWithJson(JsonObject json)
